@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const STORAGE_KEY = 'beatwave-state-v1'
+const AUTH_STORAGE_KEY = 'beatwave-auth-v1'
+const SESSION_STORAGE_KEY = 'beatwave-session-v1'
 
 const SONG_LIBRARY = [
   {
@@ -104,6 +106,8 @@ function App() {
   const [volume, setVolume] = useState(0.75)
   const [trackProgress, setTrackProgress] = useState(0)
   const [trackDuration, setTrackDuration] = useState(0)
+  const [account, setAccount] = useState(() => getSession())
+  const [authMode, setAuthMode] = useState(null)
 
   const selectedPlaylist =
     playlists.find((playlist) => playlist.id === selectedPlaylistId) || playlists[0]
@@ -295,6 +299,17 @@ function App() {
     setIsPlaying(true)
   }
 
+  function handleAuthSuccess(nextAccount) {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextAccount))
+    setAccount(nextAccount)
+    setAuthMode(null)
+  }
+
+  function handleLogout() {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY)
+    setAccount(null)
+  }
+
   return (
     <div className="app-shell">
       <div className="spotify-layout">
@@ -372,6 +387,20 @@ function App() {
               >
                 {showFavoritesOnly ? 'Showing favorites' : 'Filter favorites'}
               </button>
+              {account ? (
+                <div className="account-menu">
+                  <span className="account-avatar" aria-hidden="true">{account.name.charAt(0).toUpperCase()}</span>
+                  <div className="account-details">
+                    <strong>{account.name}</strong>
+                    <button type="button" onClick={handleLogout}>Log out</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="auth-actions">
+                  <button type="button" className="btn btn-ghost" onClick={() => setAuthMode('login')}>Log in</button>
+                  <button type="button" className="btn btn-primary" onClick={() => setAuthMode('signup')}>Sign up</button>
+                </div>
+              )}
             </div>
           </header>
 
@@ -487,6 +516,92 @@ function App() {
           className="d-none"
         />
       </footer>
+
+      {authMode ? (
+        <AuthModal
+          mode={authMode}
+          onClose={() => setAuthMode(null)}
+          onSuccess={handleAuthSuccess}
+          onSwitchMode={() => setAuthMode((mode) => mode === 'login' ? 'signup' : 'login')}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function getSession() {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const saved = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    return saved ? JSON.parse(saved) : null
+  } catch {
+    return null
+  }
+}
+
+function AuthModal({ mode, onClose, onSuccess, onSwitchMode }) {
+  const isLogin = mode === 'login'
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    const normalizedEmail = email.trim().toLowerCase()
+
+    if (!normalizedEmail || !password || (!isLogin && !name.trim())) {
+      setError('Please complete all required fields.')
+      return
+    }
+
+    try {
+      const users = JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) || '[]')
+      const existingUser = users.find((user) => user.email === normalizedEmail)
+
+      if (isLogin) {
+        if (!existingUser || existingUser.password !== password) {
+          setError('We could not match that email and password.')
+          return
+        }
+        onSuccess({ name: existingUser.name, email: existingUser.email })
+        return
+      }
+
+      if (existingUser) {
+        setError('An account with this email already exists. Please log in.')
+        return
+      }
+
+      const newUser = { name: name.trim(), email: normalizedEmail, password }
+      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify([...users, newUser]))
+      onSuccess({ name: newUser.name, email: newUser.email })
+    } catch {
+      setError('Something went wrong. Please try again.')
+    }
+  }
+
+  return (
+    <div className="auth-overlay" role="presentation" onMouseDown={onClose}>
+      <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" onMouseDown={(event) => event.stopPropagation()}>
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        <div className="auth-mark">BW</div>
+        <p className="eyebrow">Your sound, your space</p>
+        <h2 id="auth-title">{isLogin ? 'Welcome back' : 'Create your account'}</h2>
+        <p className="auth-subtitle">{isLogin ? 'Log in to pick up your listening session.' : 'Save your sound and make BeatWave yours.'}</p>
+        <form onSubmit={handleSubmit}>
+          {!isLogin ? (
+            <label className="auth-field">Display name<input type="text" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
+          ) : null}
+          <label className="auth-field">Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
+          <label className="auth-field">Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isLogin ? 'current-password' : 'new-password'} /></label>
+          {error ? <p className="error-text">{error}</p> : null}
+          <button type="submit" className="btn btn-primary auth-submit">{isLogin ? 'Log in' : 'Create account'}</button>
+        </form>
+        <p className="auth-switch">{isLogin ? 'New to BeatWave?' : 'Already have an account?'} <button type="button" onClick={onSwitchMode}>{isLogin ? 'Sign up' : 'Log in'}</button></p>
+        <p className="auth-note">Demo accounts are stored only in this browser.</p>
+      </section>
     </div>
   )
 }
